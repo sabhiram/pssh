@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/fsnotify/fsnotify"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,6 +26,41 @@ func fatalOnError(err error) {
 }
 
 func main() {
+	/*
+	 *  FS notification stuff here ...
+	 */
+	watcher, err := fsnotify.NewWatcher()
+	fatalOnError(err)
+	defer watcher.Close()
+
+	done := make(chan struct{})
+	go func() {
+		count := 0
+		for {
+			select {
+			case evt := <-watcher.Events:
+				fmt.Printf("Got event %#v\n", evt)
+				if evt.Op&fsnotify.Write == fsnotify.Write {
+					fmt.Printf("  Wrote file %s\n", evt.Name)
+				}
+			case err := <-watcher.Errors:
+				fmt.Printf("Got error: %s\n", err.Error())
+				done <- struct{}{}
+			}
+			count += 1
+			if count > 10 {
+				done <- struct{}{}
+			}
+		}
+	}()
+
+	err = watcher.Add(".")
+	fatalOnError(err)
+	<-done
+
+	/*
+	 *  SSH stuff here ...
+	 */
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
