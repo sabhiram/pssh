@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"path"
@@ -230,6 +232,14 @@ func main() {
 	func() {
 		for {
 			<-c
+
+			bs, err := ioutil.ReadFile("./README.md")
+			fatalOnError(err)
+
+			r := bytes.NewReader(bs)
+			err = client.Copy(r, "/tmp/README.md", "0755", len(bs))
+			fatalOnError(err)
+
 			fmt.Printf("Got Ctrl+C\n")
 			os.Exit(1)
 		}
