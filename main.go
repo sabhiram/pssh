@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path"
 	"strconv"
 	"strings"
 
@@ -79,7 +80,6 @@ func (s sshaddr) Port() int    { return s.port }
 type Client struct {
 	conn   ssh.Conn
 	config *ssh.ClientConfig
-	sess   *ssh.Session
 	watch  *fsnotify.Watcher
 }
 
@@ -108,33 +108,33 @@ func NewClient(addr string) (*Client, error) {
 		return nil, err
 	}
 
-	sess, err := conn.NewSession()
-	if err != nil {
-		return nil, err
-	}
-
 	return &Client{
 		conn:   conn,
 		config: config,
-		sess:   sess,
 		watch:  watch,
 	}, nil
 }
 
-func (c *Client) Start() error {
-	stdout, err := c.sess.StdoutPipe()
+func (c *Client) StartShell() error {
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	stdout, err := sess.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	go io.Copy(os.Stdout, stdout)
 
-	stderr, err := c.sess.StderrPipe()
+	stderr, err := sess.StderrPipe()
 	if err != nil {
 		return err
 	}
 	go io.Copy(os.Stderr, stderr)
 
-	stdin, err := c.sess.StdinPipe()
+	stdin, err := sess.StdinPipe()
 	if err != nil {
 		return err
 	}
@@ -145,12 +145,12 @@ func (c *Client) Start() error {
 		ssh.IGNCR: 1,
 	}
 
-	err = c.sess.RequestPty("xterm", 80, 40, term_modes)
+	err = sess.RequestPty("xterm", 80, 40, term_modes)
 	if err != nil {
 		return err
 	}
 
-	err = c.sess.Shell()
+	err = sess.Shell()
 	if err != nil {
 		return err
 	}
@@ -171,12 +171,47 @@ func (c *Client) Start() error {
 	return nil
 }
 
-func (c Client) SubscribeDir(dirpath string) error {
-	return c.watch.Add(dirpath)
+// Copy creates a new session using the underlying ssh connection and copies
+// the contents from the source reader into the destination path specified by
+// `dstpath`.  The file's permissions and size are expected.
+func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	file := path.Base(dstpath)
+	dirp := path.Dir(dstpath)
+
+	go func() {
+		dst, err := sess.StdinPipe()
+		if err != nil {
+			return err
+		}
+		defer dst.Close()
+
+		// TODO: We should probably only copy `sz` number of bytes here.
+		fmt.Printf(dst, "C%s %d %s\n", perms, sz, file)
+		io.Copy(dst, src)
+		fmt.Printf(dst, "\x00")
+	}()
+
+	return a.Session.Run("/usr/bin/scp -qt " + dirp)
+}
+
+func (c *Client) SubscribeDir(dirpath string) error {
+	err := c.watch.Add(dirpath)
+	if err != nil {
+		return err
+	}
+
+	// TODO: List all relevant files and add them to a collection somewhere.
+
+	return nil
 }
 
 func (c *Client) Close() {
-	c.sess.Close()
 	c.conn.Close()
 	c.watch.Close()
 }
