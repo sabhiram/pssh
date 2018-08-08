@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -18,12 +17,7 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-func fatalOnError(err error) {
-	if err != nil {
-		fmt.Printf("Fatal error: %s\n", err.Error())
-		os.Exit(1)
-	}
-}
+////////////////////////////////////////////////////////////////////////////////
 
 type sshaddr struct {
 	user string
@@ -80,6 +74,9 @@ func (s sshaddr) Pass() string { return s.pass }
 func (s sshaddr) Host() string { return s.host }
 func (s sshaddr) Port() int    { return s.port }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// Client wraps a `ssh.Client` which can monitor the file system for changes.
 type Client struct {
 	*ssh.Client
 
@@ -87,6 +84,7 @@ type Client struct {
 	events chan notify.EventInfo
 }
 
+// NewClient returns a ssh client which can watch files for changes.
 func NewClient(addr string) (*Client, error) {
 	ssha, err := ParseSSHAddr(addr)
 	if err != nil {
@@ -115,6 +113,9 @@ func NewClient(addr string) (*Client, error) {
 	}, nil
 }
 
+// StartShell creates a new ssh session and opens a shell to the remote address.
+// It also hooks up the standard input / output pipes to allow terminal access
+// which can be blocked by updates to subscribed files made in the local path.
 func (c *Client) StartShell() error {
 	sess, err := c.NewSession()
 	if err != nil {
@@ -161,11 +162,8 @@ func (c *Client) StartShell() error {
 		return err
 	}
 
-	for {
-		select {
-		case evt := <-c.events:
-			fmt.Printf("Got event %#v\n", evt)
-		}
+	for evt := range c.events {
+		fmt.Printf("Got event %#v\n", evt)
 	}
 	return nil
 }
@@ -199,12 +197,25 @@ func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
 	return sess.Run("/usr/bin/scp -qt " + dirp)
 }
 
+// SubscribeDir accepts a path to subscribe with the file watcher.  All events
+// will be forwarded to the clients `events` channel.  If the `dirpath` ends
+// with `/...` the watch will be recursive.
 func (c *Client) SubscribeDir(dirpath string) error {
 	return notify.Watch(dirpath, c.events, notify.All)
 }
 
+// Closes the `events` channel.
 func (c *Client) Close() {
 	close(c.events)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func fatalOnError(err error) {
+	if err != nil {
+		fmt.Printf("Fatal error: %s\n", err.Error())
+		os.Exit(1)
+	}
 }
 
 func main() {
@@ -232,8 +243,4 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-}
-
-func init() {
-	flag.Parse()
 }
