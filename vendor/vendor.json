@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "9cZCDikT35ZMrvHMs8mJVy/gjeM=",
+			"path": "github.com/rjeczalik/notify",
+			"revision": "73af26f04f4c947f6aad53f7ae0dd72fb14f824b",
+			"revisionTime": "2018-08-06T18:34:18Z"
+		},
+		{
 			"checksumSHA1": "IQkUIOnvlf0tYloFx9mLaXSvXWQ=",
 			"path": "golang.org/x/crypto/curve25519",
 			"revision": "80fca2ff14a3fb7db622c9a5462f8ce9ea026cba",

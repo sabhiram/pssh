@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/rjeczalik/notify"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -84,15 +84,10 @@ type Client struct {
 	*ssh.Client
 
 	config *ssh.ClientConfig
-	watch  *fsnotify.Watcher
+	events chan notify.EventInfo
 }
 
 func NewClient(addr string) (*Client, error) {
-	watch, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
 	ssha, err := ParseSSHAddr(addr)
 	if err != nil {
 		return nil, err
@@ -116,7 +111,7 @@ func NewClient(addr string) (*Client, error) {
 		Client: client,
 
 		config: config,
-		watch:  watch,
+		events: make(chan notify.EventInfo, 1),
 	}, nil
 }
 
@@ -168,14 +163,8 @@ func (c *Client) StartShell() error {
 
 	for {
 		select {
-		case evt := <-c.watch.Events:
+		case evt := <-c.events:
 			fmt.Printf("Got event %#v\n", evt)
-			if evt.Op&fsnotify.Write == fsnotify.Write {
-				fmt.Printf("  Wrote file %s\n", evt.Name)
-			}
-		case err := <-c.watch.Errors:
-			fmt.Printf("Got error: %s\n", err.Error())
-			return err
 		}
 	}
 	return nil
@@ -211,18 +200,11 @@ func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
 }
 
 func (c *Client) SubscribeDir(dirpath string) error {
-	err := c.watch.Add(dirpath)
-	if err != nil {
-		return err
-	}
-
-	// TODO: List all relevant files and add them to a collection somewhere.
-
-	return nil
+	return notify.Watch(dirpath, c.events, notify.All)
 }
 
 func (c *Client) Close() {
-	c.watch.Close()
+	close(c.events)
 }
 
 func main() {
@@ -230,8 +212,7 @@ func main() {
 	fatalOnError(err)
 	defer client.Close()
 
-	client.SubscribeDir(".")
-
+	client.SubscribeDir("./...")
 	go client.StartShell()
 
 	c := make(chan os.Signal, 1)
