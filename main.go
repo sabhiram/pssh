@@ -15,6 +15,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 func fatalOnError(err error) {
@@ -80,7 +81,8 @@ func (s sshaddr) Host() string { return s.host }
 func (s sshaddr) Port() int    { return s.port }
 
 type Client struct {
-	conn   ssh.Conn
+	*ssh.Client
+
 	config *ssh.ClientConfig
 	watch  *fsnotify.Watcher
 }
@@ -105,20 +107,21 @@ func NewClient(addr string) (*Client, error) {
 	}
 
 	sshAddr := fmt.Sprintf("%s:%d", ssha.Host(), ssha.Port())
-	conn, err := ssh.Dial("tcp", sshAddr, config)
+	client, err := ssh.Dial("tcp", sshAddr, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Client{
-		conn:   conn,
+		Client: client,
+
 		config: config,
 		watch:  watch,
 	}, nil
 }
 
 func (c *Client) StartShell() error {
-	sess, err := c.conn.NewSession()
+	sess, err := c.NewSession()
 	if err != nil {
 		return err
 	}
@@ -147,7 +150,13 @@ func (c *Client) StartShell() error {
 		ssh.IGNCR: 1,
 	}
 
-	err = sess.RequestPty("xterm", 80, 40, term_modes)
+	fd := int(os.Stdin.Fd())
+	w, h, err := terminal.GetSize(fd)
+	if err != nil {
+		return err
+	}
+
+	err = sess.RequestPty("xterm", h, w, term_modes)
 	if err != nil {
 		return err
 	}
@@ -169,7 +178,6 @@ func (c *Client) StartShell() error {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -177,7 +185,7 @@ func (c *Client) StartShell() error {
 // the contents from the source reader into the destination path specified by
 // `dstpath`.  The file's permissions and size are expected.
 func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
-	sess, err := c.conn.NewSession()
+	sess, err := c.NewSession()
 	if err != nil {
 		return err
 	}
@@ -189,17 +197,17 @@ func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
 	go func() {
 		dst, err := sess.StdinPipe()
 		if err != nil {
-			return err
+			return
 		}
 		defer dst.Close()
 
 		// TODO: We should probably only copy `sz` number of bytes here.
-		fmt.Printf(dst, "C%s %d %s\n", perms, sz, file)
+		fmt.Fprintf(dst, "C%s %d %s\n", perms, sz, file)
 		io.Copy(dst, src)
-		fmt.Printf(dst, "\x00")
+		fmt.Fprintf(dst, "\x00")
 	}()
 
-	return a.Session.Run("/usr/bin/scp -qt " + dirp)
+	return sess.Run("/usr/bin/scp -qt " + dirp)
 }
 
 func (c *Client) SubscribeDir(dirpath string) error {
@@ -214,7 +222,6 @@ func (c *Client) SubscribeDir(dirpath string) error {
 }
 
 func (c *Client) Close() {
-	c.conn.Close()
 	c.watch.Close()
 }
 
@@ -225,7 +232,7 @@ func main() {
 
 	client.SubscribeDir(".")
 
-	go client.Start()
+	go client.StartShell()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -237,7 +244,7 @@ func main() {
 			fatalOnError(err)
 
 			r := bytes.NewReader(bs)
-			err = client.Copy(r, "/tmp/README.md", "0755", len(bs))
+			err = client.Copy(r, "/tmp/README.md", "0755", int64(len(bs)))
 			fatalOnError(err)
 
 			fmt.Printf("Got Ctrl+C\n")
