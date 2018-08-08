@@ -9,6 +9,12 @@
 			"revisionTime": "2018-08-06T18:34:18Z"
 		},
 		{
+			"checksumSHA1": "TQTed6b92AxcQkJEx/PX728kDPE=",
+			"path": "github.com/sabhiram/sshaddr",
+			"revision": "b6369c8dfc7f81812cf4dc753ac3ee096c24d3c9",
+			"revisionTime": "2018-08-08T22:44:07Z"
+		},
+		{
 			"checksumSHA1": "IQkUIOnvlf0tYloFx9mLaXSvXWQ=",
 			"path": "golang.org/x/crypto/curve25519",
 			"revision": "80fca2ff14a3fb7db622c9a5462f8ce9ea026cba",

@@ -2,91 +2,40 @@ package main
 
 import (
 	"bytes"
-	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
-	"strings"
 
 	"github.com/rjeczalik/notify"
+	"github.com/sabhiram/sshaddr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type sshaddr struct {
-	user string
-	pass string
-	host string
-	port int
-}
-
-// ParseSSHAddr accepts a string of the form: `user[:pass]@host[:port]` and
-// populates a sshaddr instance with the appropriate fields populated.  If the
-// port is omitted, it will default to `22`.
-// TODO: Does not handle ssh host with no username.
-func ParseSSHAddr(s string) (sshaddr, error) {
-	var ret sshaddr
-
-	ss := strings.Split(s, "@")
-	if len(ss) != 2 {
-		return ret, fmt.Errorf("malformed SSH address string (%s)", s)
-	}
-
-	up := strings.Split(ss[0], ":")
-	switch len(up) {
-	case 0:
-		// nothing
-	case 1:
-		ret.user = up[0]
-	default:
-		ret.user = up[0]
-		ret.pass = strings.Join(up[1:], ":")
-	}
-
-	ret.port = 22
-
-	hp := strings.Split(ss[1], ":")
-	switch len(hp) {
-	case 1:
-		ret.host = hp[0]
-	case 2:
-		ret.host = hp[0]
-		p, err := strconv.Atoi(hp[1])
-		if err != nil {
-			return ret, fmt.Errorf("invalid port (%s)", hp[1])
-		}
-		ret.port = p
-	default:
-		return ret, errors.New("invalid host address specified")
-	}
-
-	return ret, nil
-}
-
-func (s sshaddr) User() string { return s.user }
-func (s sshaddr) Pass() string { return s.pass }
-func (s sshaddr) Host() string { return s.host }
-func (s sshaddr) Port() int    { return s.port }
+var localDir string
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Client wraps a `ssh.Client` which can monitor the file system for changes.
 type Client struct {
-	*ssh.Client
+	*ssh.Client // Client `is-a` *ssh.Client
 
-	config *ssh.ClientConfig
-	events chan notify.EventInfo
+	config *ssh.ClientConfig     // ssh connection config
+	events chan notify.EventInfo // events channel for watched changes
+
+	localDir  string // Local directory to keep in sync
+	remoteDir string // Remote directory to push files to
 }
 
 // NewClient returns a ssh client which can watch files for changes.
-func NewClient(addr string) (*Client, error) {
-	ssha, err := ParseSSHAddr(addr)
+func NewClient(addr, localDir string) (*Client, error) {
+	ssha, err := sshaddr.Parse(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +48,8 @@ func NewClient(addr string) (*Client, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	sshAddr := fmt.Sprintf("%s:%d", ssha.Host(), ssha.Port())
-	client, err := ssh.Dial("tcp", sshAddr, config)
+	hostAddr := fmt.Sprintf("%s:%d", ssha.Host(), ssha.Port())
+	client, err := ssh.Dial("tcp", hostAddr, config)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +59,9 @@ func NewClient(addr string) (*Client, error) {
 
 		config: config,
 		events: make(chan notify.EventInfo, 1),
+
+		localDir:  localDir,
+		remoteDir: ssha.Destination(),
 	}, nil
 }
 
@@ -117,29 +69,32 @@ func NewClient(addr string) (*Client, error) {
 // It also hooks up the standard input / output pipes to allow terminal access
 // which can be blocked by updates to subscribed files made in the local path.
 func (c *Client) StartShell() error {
+	// Subscribe to all changes in the local directory.
+	c.SubscribeDir(c.localDir)
+
+	// Create a new ssh session for use in a `shell`.
 	sess, err := c.NewSession()
 	if err != nil {
 		return err
 	}
 	defer sess.Close()
 
+	// Plumbing.
 	stdout, err := sess.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	go io.Copy(os.Stdout, stdout)
-
 	stderr, err := sess.StderrPipe()
 	if err != nil {
 		return err
 	}
-	go io.Copy(os.Stderr, stderr)
-
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		return err
 	}
-	go io.Copy(stdin, os.Stdin)
+	go io.Copy(os.Stdout, stdout) // session Stdout -> local Stdout
+	go io.Copy(os.Stderr, stderr) // session Stderr -> local Stderr
+	go io.Copy(stdin, os.Stdin)   // local Stdin -> session Stdin
 
 	term_modes := ssh.TerminalModes{
 		ssh.ECHO:  0,
@@ -152,18 +107,28 @@ func (c *Client) StartShell() error {
 		return err
 	}
 
-	err = sess.RequestPty("xterm", h, w, term_modes)
-	if err != nil {
+	if err := sess.RequestPty("xterm", h, w, term_modes); err != nil {
 		return err
 	}
 
-	err = sess.Shell()
-	if err != nil {
+	if err := sess.Shell(); err != nil {
 		return err
 	}
 
 	for evt := range c.events {
-		fmt.Printf("Got event %#v\n", evt)
+		path := evt.Path()
+		switch evt.Event() {
+		case notify.Create:
+			fmt.Printf("create :: %s\n", path)
+		case notify.Remove:
+			fmt.Printf("remove :: %s\n", path)
+		case notify.Write:
+			fmt.Printf("write  :: %s\n", path)
+		case notify.Rename:
+			fmt.Printf("rename :: %s\n", path)
+		default:
+			fmt.Printf("unknown (%d) :: %s", evt.Event(), path)
+		}
 	}
 	return nil
 }
@@ -219,11 +184,10 @@ func fatalOnError(err error) {
 }
 
 func main() {
-	client, err := NewClient(os.Args[1])
+	client, err := NewClient(flag.Args()[0], localDir)
 	fatalOnError(err)
 	defer client.Close()
 
-	client.SubscribeDir("./...")
 	go client.StartShell()
 
 	c := make(chan os.Signal, 1)
@@ -243,4 +207,9 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+}
+
+func init() {
+	flag.StringVar(&localDir, "local", "./...", "local directory to push to the remote")
+	flag.Parse()
 }
