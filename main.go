@@ -40,6 +40,6 @@ func main() {
 }
 
 func init() {
-	flag.StringVar(&localDir, "local", "./...", "local directory to push to the remote")
+	flag.StringVar(&localDir, "local", "./", "local directory to push to the remote")
 	flag.Parse()
 }

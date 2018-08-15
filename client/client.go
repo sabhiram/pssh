@@ -5,12 +5,16 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/rjeczalik/notify"
 	"github.com/sabhiram/sshaddr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
 )
+
+const isRecursiveWatch = true
 
 // Client wraps a `ssh.Client` which can monitor the file system for changes.
 type Client struct {
@@ -44,6 +48,8 @@ func New(addr, localDir string) (*Client, error) {
 		return nil, err
 	}
 
+	fmt.Printf("Connected!\n")
+
 	return &Client{
 		Client: client,
 
@@ -60,7 +66,11 @@ func New(addr, localDir string) (*Client, error) {
 // which can be blocked by updates to subscribed files made in the local path.
 func (c *Client) StartShell() error {
 	// Subscribe to all changes in the local directory.
-	c.SubscribeDir(c.localDir)
+	dir := c.localDir
+	if isRecursiveWatch {
+		dir = path.Join(dir, "...")
+	}
+	c.SubscribeDir(dir)
 
 	// Create a new ssh session for use in a `shell`.
 	sess, err := c.NewSession()
@@ -105,6 +115,36 @@ func (c *Client) StartShell() error {
 		return err
 	}
 
+	// Walk the local directory and recurse subdirs if the isRecursiveWalk is
+	// set to true.
+	files := []string{}
+	if err := filepath.Walk(c.localDir, func(path string, f os.FileInfo, err error) error {
+		// Ignore hidden files and directories.
+		// TODO: Ignore files on the blacklist.
+		if strings.HasPrefix(path, ".") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Sync local files to remote
+	for _, f := range files {
+		dstPath := strings.TrimPrefix(f, filepath.Clean(c.localDir))
+		if dstPath[0] == '/' {
+			dstPath = dstPath[1:]
+		}
+		absLocal, err := filepath.Abs(f)
+		if err != nil {
+			absLocal = f
+		}
+		absDst := filepath.Join(c.remoteDir, dstPath)
+		c.syncFiles(absLocal, absDst)
+	}
+
+	// Continue syncing any changes from here on out.
 	for evt := range c.events {
 		path := evt.Path()
 		switch evt.Event() {
@@ -127,22 +167,10 @@ func (c *Client) StartShell() error {
 	return nil
 }
 
-// remoteCreateFile is fired when the tracked file residing at `localPath` is
-// created.
-func (c *Client) remoteCreateFile(localPath string) error {
-	return fmt.Errorf("remoteCreateFile not implemented")
-}
-
 // remoteRemoveFile is fired when the tracked file residing at `localPath` is
 // removed.
 func (c *Client) remoteRemoveFile(localPath string) error {
 	return fmt.Errorf("remoteRemoveFile not implemented")
-}
-
-// remoteUpdateFile is fired when the tracked file residing at `localPath` is
-// updated.
-func (c *Client) remoteUpdateFile(localPath string) error {
-	return fmt.Errorf("remoteUpdateFile not implemented")
 }
 
 // remoteRenameFile is fired when the tracked file residing at `localPath` is
@@ -151,10 +179,25 @@ func (c *Client) remoteRenameFile(localPath string) error {
 	return fmt.Errorf("remoteRenameFile not implemented")
 }
 
-// Copy creates a new session using the underlying ssh connection and copies
+////////////////////////////////////////////////////////////////////////////////
+
+// Runs a `mkdir -p` for the given path to ensure that the other end has a
+// valid directory at the specified `path`.
+func (c *Client) ensureRemoteDirectory(path string) error {
+	sess, err := c.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	cmd := fmt.Sprintf("mkdir -p %s", filepath.Dir(path))
+	return sess.Run(cmd)
+}
+
+// copy creates a new session using the underlying ssh connection and copies
 // the contents from the source reader into the destination path specified by
 // `dstpath`.  The file's permissions and size are expected.
-func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
+func (c *Client) copy(src io.Reader, dstpath, perms string, sz int64) error {
 	sess, err := c.NewSession()
 	if err != nil {
 		return err
@@ -179,6 +222,49 @@ func (c *Client) Copy(src io.Reader, dstpath, perms string, sz int64) error {
 
 	return sess.Run("/usr/bin/scp -qt " + dirp)
 }
+
+//Copies the contents of an os.File to a remote location, it will get the length of the file by looking it up from the filesystem
+func (c *Client) copyFromFile(file os.File, remotePath string, perms string) error {
+	stat, _ := file.Stat()
+	return c.copy(&file, remotePath, perms, stat.Size())
+}
+
+// sync two files where both local and remote are absolute paths.
+func (c *Client) syncFiles(local, remote string) error {
+	f_local, err := os.Open(local)
+	if err != nil {
+		return err
+	}
+	defer f_local.Close()
+
+	fmt.Printf("Sync file: %s --> %s\n", local, remote)
+	if err := c.ensureRemoteDirectory(remote); err != nil {
+		return err
+	}
+
+	return c.copyFromFile(*f_local, remote, "0755")
+}
+
+// remoteUpdateFile is fired when the tracked file residing at `localPath` is
+// updated.
+func (c *Client) remoteUpdateFile(localPath string) error {
+	localDir, err := filepath.Abs(c.localDir)
+	if err != nil {
+		return err
+	}
+
+	addedPath := strings.TrimPrefix(localPath, localDir)
+	remotePath := filepath.Join(c.remoteDir, addedPath)
+	return c.syncFiles(localPath, remotePath)
+}
+
+// remoteCreateFile is fired when the tracked file residing at `localPath` is
+// created.
+func (c *Client) remoteCreateFile(localPath string) error {
+	return c.remoteUpdateFile(localPath)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 // SubscribeDir accepts a path to subscribe with the file watcher.  All events
 // will be forwarded to the clients `events` channel.  If the `dirpath` ends
