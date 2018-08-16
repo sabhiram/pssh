@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/rjeczalik/notify"
 	"github.com/sabhiram/sshaddr"
@@ -34,16 +35,34 @@ func New(addr, localDir string) (*Client, error) {
 		return nil, err
 	}
 
+	host, port := ssha.Host(), ssha.Port()
+	user, pass, auth := ssha.User(), ssha.Pass(), []ssh.AuthMethod{}
+
+	if len(pass) == 0 {
+		// TODO: No pass specified - check for cert based auth.
+
+		// Password not specified and the key files are missing, prompt
+		// the shell for a password.
+		if len(auth) == 0 {
+			fmt.Printf("%s@%s's password: ", user, host)
+			bs, err := terminal.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("\n")
+			auth = append(auth, ssh.Password(string(bs)))
+		}
+	} else {
+		auth = append(auth, ssh.Password(pass))
+	}
+
 	config := &ssh.ClientConfig{
-		User: ssha.User(),
-		Auth: []ssh.AuthMethod{
-			ssh.Password(ssha.Pass()),
-		},
+		User:            user,
+		Auth:            auth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	hostAddr := fmt.Sprintf("%s:%d", ssha.Host(), ssha.Port())
-	client, err := ssh.Dial("tcp", hostAddr, config)
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
 	if err != nil {
 		return nil, err
 	}
