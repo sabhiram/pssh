@@ -52,7 +52,7 @@ func Parse(s string) (*SSHAddr, error) {
 		p, err := strconv.Atoi(hp[1])
 		if err != nil {
 			ret.port = 22
-			ret.dest = hp[2]
+			ret.dest = hp[1]
 		} else {
 			ret.port = p
 		}

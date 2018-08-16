@@ -3,7 +3,9 @@ package client
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"strings"
@@ -15,7 +17,45 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+////////////////////////////////////////////////////////////////////////////////
+
+// checkForUserCertAuth returns any valid `ssh.AuthMethod`s available for the
+// specified user.  Permission errors should be treated correctly to allow
+// correct execution.  It is valid for this function to return nil, nil to
+// signal that nothing major went wrong but that we found no valid certs.
+func checkForUserCertAuth(username string) ([]ssh.AuthMethod, error) {
+	ret := []ssh.AuthMethod{}
+
+	u, err := user.Lookup(username)
+	if err != nil {
+		return nil, err
+	}
+
+	base := path.Join(u.HomeDir, ".ssh")
+	for _, k := range []string{"id_rsa", "id_dsa"} {
+		pkf := path.Join(base, k)
+		if _, err := os.Stat(pkf); err == nil {
+			bs, err := ioutil.ReadFile(pkf)
+			if err != nil {
+				return nil, err
+			}
+
+			k, err := ssh.ParsePrivateKey(bs)
+			if err != nil {
+				return nil, err
+			}
+
+			ret = append(ret, ssh.PublicKeys(k))
+		}
+	}
+	return ret, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 const isRecursiveWatch = true
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Client wraps a `ssh.Client` which can monitor the file system for changes.
 type Client struct {
@@ -39,7 +79,13 @@ func New(addr, localDir string) (*Client, error) {
 	user, pass, auth := ssha.User(), ssha.Pass(), []ssh.AuthMethod{}
 
 	if len(pass) == 0 {
-		// TODO: No pass specified - check for cert based auth.
+		// No pass specified - check for cert based auth.
+		cert_auths, err := checkForUserCertAuth(user)
+		if err != nil {
+			return nil, err
+		} else if len(cert_auths) > 0 {
+			auth = append(auth, cert_auths...)
+		}
 
 		// Password not specified and the key files are missing, prompt
 		// the shell for a password.
@@ -126,7 +172,7 @@ func (c *Client) StartShell() error {
 		return err
 	}
 
-	if err := sess.RequestPty("xterm", h, w, term_modes); err != nil {
+	if err := sess.RequestPty("xterm-256color", h, w, term_modes); err != nil {
 		return err
 	}
 
@@ -292,7 +338,7 @@ func (c *Client) SubscribeDir(dirpath string) error {
 	return notify.Watch(dirpath, c.events, notify.All)
 }
 
-// Closes the `events` channel.
+// Close closes the `events` channel.
 func (c *Client) Close() {
 	close(c.events)
 }
