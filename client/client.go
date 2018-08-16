@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rjeczalik/notify"
 	"github.com/sabhiram/sshaddr"
@@ -126,6 +127,13 @@ func New(addr, localDir string) (*Client, error) {
 	}, nil
 }
 
+// Attempt to update status on the same status line  ... wip
+func (c *Client) status(msg string) error {
+	fmt.Printf("\033[A\033[2K\r")
+	fmt.Printf(msg + "\n")
+	return nil
+}
+
 // StartShell creates a new ssh session and opens a shell to the remote address.
 // It also hooks up the standard input / output pipes to allow terminal access
 // which can be blocked by updates to subscribed files made in the local path.
@@ -180,13 +188,18 @@ func (c *Client) StartShell() error {
 		return err
 	}
 
+	for i := 0; i < 100; i++ {
+		c.status(strings.Repeat("#", 100-i))
+		<-time.After(100 * time.Millisecond)
+	}
+
 	// Walk the local directory and recurse subdirs if the isRecursiveWalk is
 	// set to true.
 	files := []string{}
 	if err := filepath.Walk(c.localDir, func(path string, f os.FileInfo, err error) error {
 		// Ignore hidden files and directories.
 		// TODO: Ignore files on the blacklist.
-		if strings.HasPrefix(path, ".") {
+		if strings.HasPrefix(path, ".") || f.IsDir() {
 			return nil
 		}
 		files = append(files, path)
@@ -206,7 +219,7 @@ func (c *Client) StartShell() error {
 			absLocal = f
 		}
 		absDst := filepath.Join(c.remoteDir, dstPath)
-		c.syncFiles(absLocal, absDst)
+		c.syncLocalFileToRemote(absLocal, absDst)
 	}
 
 	// Continue syncing any changes from here on out.
@@ -214,19 +227,19 @@ func (c *Client) StartShell() error {
 		path := evt.Path()
 		switch evt.Event() {
 		case notify.Create:
-			fmt.Printf("create :: %s\n", path)
+			c.status(fmt.Sprintf("create :: %s", path))
 			c.remoteCreateFile(path)
 		case notify.Remove:
-			fmt.Printf("remove :: %s\n", path)
+			c.status(fmt.Sprintf("remove :: %s", path))
 			c.remoteRemoveFile(path)
 		case notify.Write:
-			fmt.Printf("write  :: %s\n", path)
+			c.status(fmt.Sprintf("write  :: %s", path))
 			c.remoteUpdateFile(path)
 		case notify.Rename:
-			fmt.Printf("rename :: %s\n", path)
+			c.status(fmt.Sprintf("rename :: %s", path))
 			c.remoteRenameFile(path)
 		default:
-			fmt.Printf("unknown (%d) :: %s", evt.Event(), path)
+			c.status(fmt.Sprintf("unknown (%d) :: %s", evt.Event(), path))
 		}
 	}
 	return nil
@@ -295,14 +308,15 @@ func (c *Client) copyFromFile(file os.File, remotePath string, perms string) err
 }
 
 // sync two files where both local and remote are absolute paths.
-func (c *Client) syncFiles(local, remote string) error {
+func (c *Client) syncLocalFileToRemote(local, remote string) error {
 	f_local, err := os.Open(local)
 	if err != nil {
 		return err
 	}
 	defer f_local.Close()
 
-	fmt.Printf("Sync file: %s --> %s\n", local, remote)
+	status := fmt.Sprintf("Sync file: %s --> %s", local, remote)
+	c.status(status)
 	if err := c.ensureRemoteDirectory(remote); err != nil {
 		return err
 	}
@@ -320,7 +334,7 @@ func (c *Client) remoteUpdateFile(localPath string) error {
 
 	addedPath := strings.TrimPrefix(localPath, localDir)
 	remotePath := filepath.Join(c.remoteDir, addedPath)
-	return c.syncFiles(localPath, remotePath)
+	return c.syncLocalFileToRemote(localPath, remotePath)
 }
 
 // remoteCreateFile is fired when the tracked file residing at `localPath` is
