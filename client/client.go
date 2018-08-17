@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/rjeczalik/notify"
 	"github.com/sabhiram/sshaddr"
@@ -186,11 +185,6 @@ func (c *Client) StartShell() error {
 
 	if err := sess.Shell(); err != nil {
 		return err
-	}
-
-	for i := 0; i < 100; i++ {
-		c.status(strings.Repeat("#", 100-i))
-		<-time.After(100 * time.Millisecond)
 	}
 
 	// Walk the local directory and recurse subdirs if the isRecursiveWalk is
