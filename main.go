@@ -43,3 +43,8 @@ func init() {
 	flag.StringVar(&localDir, "local", "./", "local directory to push to the remote")
 	flag.Parse()
 }
+
+/*
+TODO:
+	folder creation does not work :) - it makes a remote file instead?
+*/

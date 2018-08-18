@@ -128,9 +128,34 @@ func New(addr, localDir string) (*Client, error) {
 
 // Attempt to update status on the same status line  ... wip
 func (c *Client) status(msg string) error {
-	fmt.Printf("\033[A\033[2K\r")
-	fmt.Printf(msg + "\n")
+	// fmt.Printf("\033[A\033[2K\r")
+	fmt.Printf("\r%s\n", msg)
+	// fmt.Printf(msg + "\n")
 	return nil
+}
+
+func setupTerminalForSession(fd int, sess *ssh.Session) (*terminal.State, error) {
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+
+	termState, err := terminal.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+
+	w, h, err := terminal.GetSize(fd)
+	if err != nil {
+		return nil, err
+	}
+
+	return termState, sess.RequestPty("xterm-256color", h, w, modes)
+}
+
+func restoreTerminal(fd int, state *terminal.State) error {
+	return terminal.Restore(fd, state)
 }
 
 // StartShell creates a new ssh session and opens a shell to the remote address.
@@ -152,36 +177,34 @@ func (c *Client) StartShell() error {
 	defer sess.Close()
 
 	// Plumbing.
-	stdout, err := sess.StdoutPipe()
+	sessStdout, err := sess.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	stderr, err := sess.StderrPipe()
+	sessStderr, err := sess.StderrPipe()
 	if err != nil {
 		return err
 	}
-	stdin, err := sess.StdinPipe()
-	if err != nil {
-		return err
-	}
-	go io.Copy(os.Stdout, stdout) // session Stdout -> local Stdout
-	go io.Copy(os.Stderr, stderr) // session Stderr -> local Stderr
-	go io.Copy(stdin, os.Stdin)   // local Stdin -> session Stdin
-
-	term_modes := ssh.TerminalModes{
-		ssh.ECHO:  0,
-		ssh.IGNCR: 1,
-	}
-
-	fd := int(os.Stdin.Fd())
-	w, h, err := terminal.GetSize(fd)
+	sessStdin, err := sess.StdinPipe()
 	if err != nil {
 		return err
 	}
 
-	if err := sess.RequestPty("xterm-256color", h, w, term_modes); err != nil {
+	localStdin := os.Stdin
+	localStdout, localStderr := os.Stdout, os.Stderr
+	go io.Copy(localStdout, sessStdout) // session Stdout -> local Stdout
+	go io.Copy(localStderr, sessStderr) // session Stderr -> local Stderr
+	go io.Copy(sessStdin, localStdin)   // local Stdin -> session Stdin
+
+	/*
+	 *  Setup the terminal in raw mode and request the appropriate h x w.
+	 */
+	fd := int(localStdin.Fd())
+	oldState, err := setupTerminalForSession(fd, sess)
+	if err != nil {
 		return err
 	}
+	defer restoreTerminal(fd, oldState)
 
 	if err := sess.Shell(); err != nil {
 		return err
@@ -216,6 +239,7 @@ func (c *Client) StartShell() error {
 		c.syncLocalFileToRemote(absLocal, absDst)
 	}
 
+	// TODO: We need a way to break out of this :)
 	// Continue syncing any changes from here on out.
 	for evt := range c.events {
 		path := evt.Path()
