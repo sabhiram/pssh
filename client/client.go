@@ -277,17 +277,22 @@ func (c *Client) remoteRenameFile(localPath string) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Runs a `mkdir -p` for the given path to ensure that the other end has a
-// valid directory at the specified `path`.
-func (c *Client) ensureRemoteDirectory(path string) error {
+// runRemoteCommand runs
+func (c *Client) runRemoteCommand(cmd string) error {
 	sess, err := c.NewSession()
 	if err != nil {
 		return err
 	}
 	defer sess.Close()
 
-	cmd := fmt.Sprintf("mkdir -p %s", filepath.Dir(path))
 	return sess.Run(cmd)
+}
+
+// Runs a `mkdir -p` for the given path to ensure that the other end has a
+// valid directory at the specified `path`.
+func (c *Client) ensureRemoteDirectory(path string) error {
+	cmf := fmt.Sprintf("mkdir -p %s", filepath.Dir(path))
+	return c.runRemoteCommand(cmd)
 }
 
 // copy creates a new session using the underlying ssh connection and copies
