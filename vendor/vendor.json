@@ -3,10 +3,10 @@
 	"ignore": "test",
 	"package": [
 		{
-			"checksumSHA1": "9cZCDikT35ZMrvHMs8mJVy/gjeM=",
+			"checksumSHA1": "D8AVDI39CJ+jvw0HOotYU2gz54c=",
 			"path": "github.com/rjeczalik/notify",
-			"revision": "73af26f04f4c947f6aad53f7ae0dd72fb14f824b",
-			"revisionTime": "2018-08-06T18:34:18Z"
+			"revision": "4e54e7fd043e865c50bda93359fb78813a8d165b",
+			"revisionTime": "2018-08-08T20:39:25Z"
 		},
 		{
 			"checksumSHA1": "N5xpa4Grsc1bX6ujJqQzmoy7+gM=",
@@ -51,10 +51,10 @@
 			"revisionTime": "2018-08-06T18:50:12Z"
 		},
 		{
-			"checksumSHA1": "5UDaK1KsPOI7P/Q1b17FnNno36o=",
+			"checksumSHA1": "zVyAf4OPyjBraXqRN2fwIBL4WvI=",
 			"path": "golang.org/x/crypto/ssh",
-			"revision": "80fca2ff14a3fb7db622c9a5462f8ce9ea026cba",
-			"revisionTime": "2018-08-06T18:50:12Z"
+			"revision": "614d502a4dac94afa3a6ce146bd1736da82514c6",
+			"revisionTime": "2018-07-28T08:01:47Z"
 		},
 		{
 			"checksumSHA1": "QbhkYdTB4gx5EAAU/UhyysdCAkg=",
@@ -63,10 +63,22 @@
 			"revisionTime": "2018-08-06T08:54:14Z"
 		},
 		{
+			"checksumSHA1": "BGm8lKZmvJbf/YOJLeL1rw2WVjA=",
+			"path": "golang.org/x/crypto/ssh/terminal",
+			"revision": "614d502a4dac94afa3a6ce146bd1736da82514c6",
+			"revisionTime": "2018-07-28T08:01:47Z"
+		},
+		{
 			"checksumSHA1": "pWhBm9kOMba1EROTrG6EpIC31yQ=",
 			"path": "golang.org/x/sys/unix",
 			"revision": "2be389f392cd91df245b41638f818a1c041f0c08",
 			"revisionTime": "2018-08-06T15:52:30Z"
+		},
+		{
+			"checksumSHA1": "apLcjhTfa/nKhpXTXjpfIZxVTKQ=",
+			"path": "golang.org/x/sys/windows",
+			"revision": "11551d06cbcc94edc80a0facaccbda56473c19c1",
+			"revisionTime": "2018-08-23T14:12:18Z"
 		}
 	],
 	"rootPath": "github.com/sabhiram/pssh"

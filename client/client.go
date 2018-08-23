@@ -34,6 +34,7 @@ func checkForUserCertAuth(username string) ([]ssh.AuthMethod, error) {
 	base := path.Join(u.HomeDir, ".ssh")
 	for _, k := range []string{"id_rsa", "id_dsa"} {
 		pkf := path.Join(base, k)
+		fmt.Printf("PKF=%s\n", pkf)
 		if _, err := os.Stat(pkf); err == nil {
 			bs, err := ioutil.ReadFile(pkf)
 			if err != nil {
@@ -44,6 +45,9 @@ func checkForUserCertAuth(username string) ([]ssh.AuthMethod, error) {
 			if err != nil {
 				return nil, err
 			}
+
+			// TODO: Handle if there is a passphrase.
+			// https: //github.com/golang/crypto/blob/master/ssh/agent/keyring.go
 
 			ret = append(ret, ssh.PublicKeys(k))
 		}
