@@ -291,7 +291,7 @@ func (c *Client) runRemoteCommand(cmd string) error {
 // Runs a `mkdir -p` for the given path to ensure that the other end has a
 // valid directory at the specified `path`.
 func (c *Client) ensureRemoteDirectory(path string) error {
-	cmf := fmt.Sprintf("mkdir -p %s", filepath.Dir(path))
+	cmd := fmt.Sprintf("mkdir -p %s", filepath.Dir(path))
 	return c.runRemoteCommand(cmd)
 }
 
