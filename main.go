@@ -11,7 +11,10 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-var localDir string
+var (
+	localDir        string
+	skipInitialSync bool
+)
 
 func fatalOnError(err error) {
 	if err != nil {
@@ -26,7 +29,7 @@ func main() {
 	fatalOnError(err)
 	defer client.Close()
 
-	go client.StartShell()
+	go client.StartShell(skipInitialSync)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -41,6 +44,7 @@ func main() {
 
 func init() {
 	flag.StringVar(&localDir, "local", "./", "local directory to push to the remote")
+	flag.BoolVar(&skipInitialSync, "skip-sync", false, "if true, will skip the initial sync")
 	flag.Parse()
 }
 

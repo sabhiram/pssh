@@ -165,7 +165,7 @@ func restoreTerminal(fd int, state *terminal.State) error {
 // StartShell creates a new ssh session and opens a shell to the remote address.
 // It also hooks up the standard input / output pipes to allow terminal access
 // which can be blocked by updates to subscribed files made in the local path.
-func (c *Client) StartShell() error {
+func (c *Client) StartShell(skipInitialSync bool) error {
 	// Subscribe to all changes in the local directory.
 	dir := c.localDir
 	if isRecursiveWatch {
@@ -215,32 +215,34 @@ func (c *Client) StartShell() error {
 	}
 
 	// Walk the local directory and recurse subdirs if the isRecursiveWalk is
-	// set to true.
-	files := []string{}
-	if err := filepath.Walk(c.localDir, func(path string, f os.FileInfo, err error) error {
-		// Ignore hidden files and directories.
-		// TODO: Ignore files on the blacklist.
-		if strings.HasPrefix(path, ".") || f.IsDir() {
+	// set to true.  Only do this if the `skipInitialSync` is not set.
+	if !skipInitialSync {
+		files := []string{}
+		if err := filepath.Walk(c.localDir, func(path string, f os.FileInfo, err error) error {
+			// Ignore hidden files and directories.
+			// TODO: Ignore files on the blacklist.
+			if strings.HasPrefix(path, ".") || f.IsDir() {
+				return nil
+			}
+			files = append(files, path)
 			return nil
+		}); err != nil {
+			return err
 		}
-		files = append(files, path)
-		return nil
-	}); err != nil {
-		return err
-	}
 
-	// Sync local files to remote
-	for _, f := range files {
-		dstPath := strings.TrimPrefix(f, filepath.Clean(c.localDir))
-		if dstPath[0] == '/' {
-			dstPath = dstPath[1:]
+		// Sync local files to remote
+		for _, f := range files {
+			dstPath := strings.TrimPrefix(f, filepath.Clean(c.localDir))
+			if dstPath[0] == '/' {
+				dstPath = dstPath[1:]
+			}
+			absLocal, err := filepath.Abs(f)
+			if err != nil {
+				absLocal = f
+			}
+			absDst := filepath.Join(c.remoteDir, dstPath)
+			c.syncLocalFileToRemote(absLocal, absDst)
 		}
-		absLocal, err := filepath.Abs(f)
-		if err != nil {
-			absLocal = f
-		}
-		absDst := filepath.Join(c.remoteDir, dstPath)
-		c.syncLocalFileToRemote(absLocal, absDst)
 	}
 
 	// TODO: We need a way to break out of this :)
